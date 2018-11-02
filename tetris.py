@@ -265,6 +265,9 @@ class Game:
         self.screen.blit(text1, (START_LEFT * 4 + BOX_DIMENSION * (GAME_WIDTH + 1), START_TOP * 3 + BOX_DIMENSION * 7))
         self.screen.blit(text2, (START_LEFT * 4 + BOX_DIMENSION * (GAME_WIDTH + 1), START_TOP * 3 + BOX_DIMENSION * 9))
 
+    def update_screen(self):
+        pygame.display.update()
+
     def display(self, update_screen=True):
         self.clear_display()
         self.display_shadow()
@@ -273,7 +276,7 @@ class Game:
         self.display_next_piece()
         self.display_score()
         if update_screen:
-            pygame.display.update()
+            self.update_screen()
 
     def try_put(self, row: int, col: int, blot: Blot) -> bool:
         if not 0 <= row < GAME_HEIGHT or not 0 <= col < GAME_WIDTH:
@@ -334,9 +337,19 @@ class Game:
         self.level = self.lines // 10
 
     def animate_elision(self, rows_to_elide: List[int]):
-        for x in range(20):
-            print(x)
+        for x in range(GAME_WIDTH):
+            self.display(update_screen=False)
+            for col in range(x + 1):
+                for row in rows_to_elide:
+                    self.draw_blot(self.board[row][col], row=row, column=col, color=(0, 0, 0))
+            self.update_screen()
+            # wait 20 frames
             yield
+
+        for rowid in rows_to_elide:
+            del self.board[rowid]
+            self.board.insert(0, [Blot(BlotType.EMPTY)] * GAME_WIDTH)
+
 
     def elide_tetrises(self):
         rows_to_elide = []
@@ -346,10 +359,6 @@ class Game:
             full_row = len(placed_in_row) == GAME_WIDTH
             if full_row:
                 rows_to_elide.append(row)
-
-        for rowid in rows_to_elide:
-            del self.board[rowid]
-            self.board.insert(0, [Blot(BlotType.EMPTY)] * GAME_WIDTH)
 
         if len(rows_to_elide) != 0:
             self.add_points_for_elision(len(rows_to_elide))
@@ -494,7 +503,12 @@ def main():
             return
         elif event.type == TIMER_EVENT:
             game.do_tick()
-        elif event.type == pygame.KEYDOWN:
+            continue
+
+        if game.running_elision_animation:
+            continue  # Don't react to keystrokes while animating elision
+
+        if event.type == pygame.KEYDOWN:
             key = event.key
 
             if key == pygame.K_LEFT:
