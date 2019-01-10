@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import random
 import pygame
 from enum import Enum
@@ -18,59 +19,72 @@ START_TOP = 30
 SCREEN_HEIGHT = 720
 SCREEN_WIDTH = 1200
 
+REMOTE_GAME_LEFT_MARGIN = START_LEFT + BOX_DIMENSION * (GAME_WIDTH + 5)
+
+SAVE_PATH = os.path.expanduser("~/.pytris-save")
+
 
 # TODO: It would be great if this could be a @dataclass but charon.kis.agh.edu.pl has an outdated Python version
 class Piece:
-    def __init__(self, arrangement, color, can_be_first, long_tetrimono_rotation=False, no_rotation=False):
+    def __init__(self, arrangement, color, can_be_first, long_tetrimono_rotation=False, no_rotation=False, id=0):
         self.arrangement = arrangement
         self.color = color
         self.long_tetrimono_rotation = long_tetrimono_rotation
         self.can_be_first = can_be_first
         self.no_rotation = no_rotation
+        self.id = id
+
+
+PIECES = [
+    Piece(arrangement=[[1, 2, 1, 1],
+                       [0, 0, 0, 0]],
+          color=(0x00, 0xff, 0xff),
+          long_tetrimono_rotation=True,
+          can_be_first=True,
+          id=1),
+
+    Piece(arrangement=[[1, 2, 1, 0],
+                       [0, 0, 1, 0]],
+          color=(0x30, 0x30, 0xff),
+          can_be_first=True,
+          id=2),
+
+    Piece(arrangement=[[1, 2, 1, 0],
+                       [1, 0, 0, 0]],
+          color=(0xff, 0xa5, 0x00),
+          can_be_first=True,
+          id=3),
+
+    Piece(arrangement=[[1, 1, 0, 0],
+                       [1, 2, 0, 0]],
+          color=(0xff, 0xff, 0x00),
+          no_rotation=True,
+          can_be_first=True,
+          id=4),
+
+    Piece(arrangement=[[0, 1, 1, 0],
+                       [1, 2, 0, 0]],
+          color=(0x00, 0xff, 0x00),
+          can_be_first=False,
+          id=5),
+
+    Piece(arrangement=[[1, 2, 1, 0],
+                       [0, 1, 0, 0]],
+          color=(0x80, 0x00, 0x80),
+          can_be_first=True,
+          id=6),
+
+    Piece(arrangement=[[1, 2, 0, 0],
+                       [0, 1, 1, 0]],
+          color=(0xff, 0x00, 0x00),
+          can_be_first=False,
+          id=7),
+]
 
 
 class RandomPieceGenerator:
-    PIECES = [
-        Piece(arrangement=[[1, 2, 1, 1],
-                           [0, 0, 0, 0]],
-              color=(0x00, 0xff, 0xff),
-              long_tetrimono_rotation=True,
-              can_be_first=True),
-
-        Piece(arrangement=[[1, 2, 1, 0],
-                           [0, 0, 1, 0]],
-              color=(0x30, 0x30, 0xff),
-              can_be_first=True),
-
-        Piece(arrangement=[[1, 2, 1, 0],
-                           [1, 0, 0, 0]],
-              color=(0xff, 0xa5, 0x00),
-              can_be_first=True),
-
-        Piece(arrangement=[[1, 1, 0, 0],
-                           [1, 2, 0, 0]],
-              color=(0xff, 0xff, 0x00),
-              no_rotation=True,
-              can_be_first=True),
-
-        Piece(arrangement=[[0, 1, 1, 0],
-                           [1, 2, 0, 0]],
-              color=(0x00, 0xff, 0x00),
-              can_be_first=False),
-
-        Piece(arrangement=[[1, 2, 1, 0],
-                           [0, 1, 0, 0]],
-              color=(0x80, 0x00, 0x80),
-              can_be_first=True),
-
-        Piece(arrangement=[[1, 2, 0, 0],
-                           [0, 1, 1, 0]],
-              color=(0xff, 0x00, 0x00),
-              can_be_first=False),
-    ]
-
     def __init__(self):
-        pieces_that_can_be_first = [piece for piece in self.PIECES if piece.can_be_first]
+        pieces_that_can_be_first = [piece for piece in PIECES if piece.can_be_first]
         self._next_pieces_buffer = [random.choice(pieces_that_can_be_first)]
         self._fill_buffer_if_needed()
 
@@ -83,7 +97,7 @@ class RandomPieceGenerator:
         if len(self._next_pieces_buffer) > 2:
             return
 
-        for piece in shuffle_out_of_place(self.PIECES):
+        for piece in shuffle_out_of_place(PIECES):
             self._next_pieces_buffer.append(piece)
 
     def next(self) -> Piece:
@@ -125,23 +139,35 @@ class Blot:
     def should_rotate(self) -> bool:
         return self._piece is not None and not self._piece.no_rotation
 
+    def get_color_id(self):
+        if self.is_empty():
+            return 0
+        elif self.is_placed():
+            return self._piece.id
+        elif self.is_falling():
+            return self._piece.id | 0b1000
+
 
 class GameOverException(Exception):
     pass
 
 
 class Game:
-    def __init__(self, screen, font):
+    def __init__(self, screen, font, width, start_left=START_LEFT):
         self.screen = screen
         self.random_piece_generator = RandomPieceGenerator()
         self.level = 0
         self.points = 0
         self.frame = 0
         self.lines = 0
+        self.pause_font = None
+        self.paused = False
         self.font = font
         self.board: List[List[Blot]] = []
         self.running_elision_animation = False
         self.elision_animation_generator = None
+        self.start_left = start_left
+        self.width = width
         for _ in range(GAME_HEIGHT):
             self.board.append([Blot(BlotType.EMPTY)] * GAME_WIDTH)
 
@@ -171,17 +197,28 @@ class Game:
             return 1
         return level_to_frames[self.level]
 
+    def display_pause(self):
+        if self.pause_font is None:
+            self.pause_font = pygame.font.SysFont('monospace', 100)
+        text = self.pause_font.render("Pause", True, (160, 160, 160))
+        text_rect = text.get_rect(center=(SCREEN_WIDTH/2, SCREEN_HEIGHT/2))
+        self.screen.blit(text, text_rect)
+        self.update_screen()
+
     def display_text(self):
         for row in self.board:
             for piece in row:
                 print('-' if piece.is_empty() else 'x', end='')
             print()
 
-    def draw_blot(self, blot: Blot, row=0, column=0, start_dimensions=(START_LEFT, START_TOP), color=None):
-        left = start_dimensions[0] + column * BOX_DIMENSION
-        top = start_dimensions[1] + row * BOX_DIMENSION
+    def draw_blot(self, blot: Blot, row=0, column=0, start_dimensions=None, color=None):
+        if start_dimensions is None:
+            start_dimensions = (self.start_left, START_TOP)
 
         if not blot.is_empty():
+            left = start_dimensions[0] + column * BOX_DIMENSION
+            top = start_dimensions[1] + row * BOX_DIMENSION
+
             border = BOX_DIMENSION * 0.1
             color_scale = 0.8
 
@@ -198,17 +235,17 @@ class Game:
                              (left + border, top + border, BOX_DIMENSION - 2 * border, BOX_DIMENSION - 2 * border))
 
     def clear_display(self):
-        # Clear the whole screen
+        # # Clear the whole screen
         pygame.draw.rect(self.screen, (50, 50, 50), (0, 0, SCREEN_WIDTH, SCREEN_HEIGHT))
 
         # Black game background
         height = BOX_DIMENSION * GAME_HEIGHT
         width = BOX_DIMENSION * GAME_WIDTH
-        pygame.draw.rect(self.screen, (0, 0, 0), (START_LEFT, START_TOP, width, height))
+        pygame.draw.rect(self.screen, (0, 0, 0), (self.start_left, START_TOP, width, height))
 
     def display_next_piece(self):
         top = START_TOP * 3
-        left = START_LEFT * 4 + (BOX_DIMENSION * GAME_WIDTH)
+        left = self.start_left * 4 + (BOX_DIMENSION * GAME_WIDTH)
 
         # The 'Next piece' box
         pygame.draw.rect(self.screen, (70, 70, 70), (left, top, BOX_DIMENSION * 6, BOX_DIMENSION * 4))
@@ -262,8 +299,8 @@ class Game:
         s2 = "Level: %s" % self.level
         text1=self.font.render(s1, 1, (127, 127, 127))
         text2=self.font.render(s2, 1, (127, 127, 127))
-        self.screen.blit(text1, (START_LEFT * 4 + BOX_DIMENSION * (GAME_WIDTH + 1), START_TOP * 3 + BOX_DIMENSION * 7))
-        self.screen.blit(text2, (START_LEFT * 4 + BOX_DIMENSION * (GAME_WIDTH + 1), START_TOP * 3 + BOX_DIMENSION * 9))
+        self.screen.blit(text1, (self.start_left * 4 + BOX_DIMENSION * (GAME_WIDTH + 1), START_TOP * 3 + BOX_DIMENSION * 7))
+        self.screen.blit(text2, (self.start_left * 4 + BOX_DIMENSION * (GAME_WIDTH + 1), START_TOP * 3 + BOX_DIMENSION * 9))
 
     def update_screen(self):
         pygame.display.update()
@@ -275,6 +312,8 @@ class Game:
             self.draw_blot(blot, row, col)
         self.display_next_piece()
         self.display_score()
+        if self.paused:
+            self.display_pause()
         if update_screen:
             self.update_screen()
 
@@ -366,6 +405,10 @@ class Game:
             self.running_elision_animation = True
             self.elision_animation_generator = self.animate_elision(rows_to_elide)
 
+    def save_game(self):
+        with open(SAVE_PATH, "wb") as save_file:
+            save_file.write(self.board_to_bin())
+
     def do_tick(self):
         if self.running_elision_animation:
             try:
@@ -377,6 +420,7 @@ class Game:
                 self.do_fall()
                 self.elide_tetrises()
             else:
+                self.save_game()
                 self.put_new_tetrimono()
             self.display()
             # self.display_text()
@@ -482,6 +526,94 @@ class Game:
                 return
 
 
+    def board_to_bin(self):
+        out = bytearray()
+        out += self.points.to_bytes(8, byteorder='big')
+        out += self.lines.to_bytes(4, byteorder='big')
+        out += self.level.to_bytes(4, byteorder='big')
+        for i, (row, col, blot) in enumerate(self.all_blots):
+            if i & 1 == 0:  # every second blot starting from the first
+                out += bytes([blot.get_color_id() << 4])
+            else:  # every second blot starting from the second one
+                out[-1] |= blot.get_color_id()
+        return out
+        # TODO: points, center piece location (there's only one - should fit in a byte(?))
+
+
+    @staticmethod
+    def blot_from_id(id):
+        if id == 0:
+            return Blot(BlotType.EMPTY)
+        piece = PIECES[(id & 0b111) - 1]
+        if id & 0b1000 != 0:
+            return Blot(BlotType.FALLING, piece=piece)
+        else:
+            return Blot(BlotType.PLACED, piece=piece)
+
+
+    def set_blot_by_index(self, i, blot):
+        self.board[i // GAME_WIDTH][i % GAME_WIDTH] = blot
+
+
+    def bin_to_board(self, data):
+        EXPECTED_SIZE = 16 + (GAME_HEIGHT * GAME_WIDTH) // 2
+        if len(data) != EXPECTED_SIZE:
+            print("Wrong save file size! Expected {} but got {}.".format(EXPECTED_SIZE, len(data)))
+            return
+        self.points = int.from_bytes(data[0:8], byteorder='big')
+        self.lines = int.from_bytes(data[8:12], byteorder='big')
+        self.level = int.from_bytes(data[12:16], byteorder='big')
+        for i, byte in enumerate(data[16:]):
+            i *= 2  # every byte has 2 blots in it
+            self.set_blot_by_index(i, self.blot_from_id(byte >> 4))
+            self.set_blot_by_index(i + 1, self.blot_from_id(byte & 0b1111))
+
+    def try_load(self):
+        with open(SAVE_PATH, "rb") as save_file:
+            self.bin_to_board(save_file.read())
+
+MenuResult = Enum('MenuResult', ['new_game', 'load_game'])
+def menu(screen, font):
+    position = 0
+    position_range = (0, 2)
+    while True:
+        event = pygame.event.wait()
+        if event.type == pygame.QUIT:
+            pygame.quit()
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_DOWN:
+                position += 1
+            elif event.key == pygame.K_UP:
+                position -= 1
+            elif event.key == pygame.K_RETURN:
+                if position == 0:
+                    return MenuResult.new_game
+                elif position == 1:
+                    return MenuResult.load_game
+                elif position == 2:
+                    pygame.quit()
+            position = min(position, position_range[1])
+            position = max(position, position_range[0])
+
+        pygame.draw.rect(screen, (0, 0, 0, 0), (0, 0, SCREEN_WIDTH, SCREEN_HEIGHT))
+
+        def draw_button(idx, label):
+            shade = 100 if idx == position else 50
+            BUTTON_WIDTH = 300
+            BUTTON_HEIGHT = 80
+            height = SCREEN_HEIGHT/4 + BUTTON_HEIGHT * 2 * idx
+            pygame.draw.rect(screen, (shade, shade, shade, 0), 
+                    (SCREEN_WIDTH/2 - BUTTON_WIDTH/2, height, BUTTON_WIDTH, BUTTON_HEIGHT))
+            text = font.render(label, True, (240, 240, 240))
+            text_rect = text.get_rect(center=(SCREEN_WIDTH/2, height + BUTTON_HEIGHT/2))
+            screen.blit(text, text_rect)
+
+        draw_button(0, "Start")
+        draw_button(1, "Load last game")
+        draw_button(2, "Exit")
+        pygame.display.update()
+
 def main():
     pygame.init()
 
@@ -490,52 +622,72 @@ def main():
     font = pygame.font.SysFont("monospace", 40)
 
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    game = Game(screen, font)
+
+    menu_result = menu(screen, font)
+
+    game = Game(screen, font, REMOTE_GAME_LEFT_MARGIN)
+    if menu_result == MenuResult.load_game:
+        game.try_load()
+
+    #game = MultiplayerGame(screen, font, REMOTE_GAME_LEFT_MARGIN)
+    #remoteGame = MirroredRemoteGame(screen, font)
 
     TIMER_EVENT = pygame.USEREVENT
 
     pygame.time.set_timer(TIMER_EVENT, 1000 // 50)
 
-    while True:
-        event = pygame.event.wait()
-        #print(event)
-        if event.type == pygame.QUIT:
-            return
-        elif event.type == TIMER_EVENT:
-            game.do_tick()
-            continue
+    try:
+        while True:
+            event = pygame.event.wait()
+            #print(event)
+            if event.type == pygame.QUIT:
+                pygame.quit()
+            elif not game.paused and event.type == TIMER_EVENT:
+                game.do_tick()
+                continue
 
-        if game.running_elision_animation:
-            continue  # Don't react to keystrokes while animating elision
+            if not game.paused and game.running_elision_animation:
+                continue  # Don't react to keystrokes while animating elision
 
-        if event.type == pygame.KEYDOWN:
-            key = event.key
+            if event.type == pygame.KEYDOWN:
+                key = event.key
 
-            if key == pygame.K_LEFT:
-                game.falling_move_left()
+                if key == pygame.K_p:
+                    game.paused = not game.paused
 
-            elif key == pygame.K_RIGHT:
-                game.falling_move_right()
+                elif game.paused:
+                    pass
 
-            elif key == pygame.K_x or key == pygame.K_UP:
-                game.falling_rotate_clockwise()
+                elif key == pygame.K_LEFT:
+                    game.falling_move_left()
 
-            elif key == pygame.K_DOWN:
-                if game.do_fall():
-                    game.add_points(1)
-                    game.elide_tetrises()
-                    game.put_new_tetrimono()
+                elif key == pygame.K_RIGHT:
+                    game.falling_move_right()
 
-            elif key == pygame.K_SPACE:
-                if game.has_falling_tetrimono():
-                    while not game.do_fall():
+                elif key == pygame.K_x or key == pygame.K_UP:
+                    game.falling_rotate_clockwise()
+
+                elif key == pygame.K_DOWN:
+                    if game.do_fall():
                         game.add_points(1)
-                    game.elide_tetrises()
-                    game.put_new_tetrimono()
+                        game.elide_tetrises()
+                        game.save_game()
+                        game.put_new_tetrimono()
 
-            #game.display_text()
-            game.display()
+                elif key == pygame.K_SPACE:
+                    if game.has_falling_tetrimono():
+                        while not game.do_fall():
+                            game.add_points(1)
+                        game.elide_tetrises()
+                        game.save_game()
+                        game.put_new_tetrimono()
 
+                #game.display_text()
+                # Clear the whole screen
+                game.display()
+    except GameOverException:
+        pass
 
 if __name__ == '__main__':
-    main()
+    while True:
+        main()
