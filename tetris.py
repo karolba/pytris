@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 import random
 import pygame
 from enum import Enum
@@ -23,6 +24,10 @@ REMOTE_GAME_LEFT_MARGIN = START_LEFT + BOX_DIMENSION * (GAME_WIDTH + 5)
 
 SAVE_PATH = os.path.expanduser("~/.pytris-save")
 
+def quit():
+    pygame.display.quit()
+    pygame.quit()
+    sys.exit()
 
 # TODO: It would be great if this could be a @dataclass but charon.kis.agh.edu.pl has an outdated Python version
 class Piece:
@@ -578,15 +583,15 @@ def menu(screen, font):
     position_range = (0, 2)
     while True:
         event = pygame.event.wait()
-        if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESC):
-            pygame.quit()
+        if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+            quit()
 
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_DOWN:
                 position += 1
             elif event.key == pygame.K_UP:
                 position -= 1
-            elif event.key == pygame.K_RETURN:
+            elif event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
                 if position == 0:
                     return MenuResult.new_game
                 elif position == 1:
@@ -640,8 +645,8 @@ def main():
         while True:
             event = pygame.event.wait()
             #print(event)
-            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESC):
-                pygame.quit()
+            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                quit()
             elif not game.paused and event.type == TIMER_EVENT:
                 game.do_tick()
                 continue
