@@ -578,7 +578,7 @@ def menu(screen, font):
     position_range = (0, 2)
     while True:
         event = pygame.event.wait()
-        if event.type == pygame.QUIT:
+        if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESC):
             pygame.quit()
 
         if event.type == pygame.KEYDOWN:
@@ -640,7 +640,7 @@ def main():
         while True:
             event = pygame.event.wait()
             #print(event)
-            if event.type == pygame.QUIT:
+            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESC):
                 pygame.quit()
             elif not game.paused and event.type == TIMER_EVENT:
                 game.do_tick()
